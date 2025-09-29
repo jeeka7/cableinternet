@@ -321,7 +321,6 @@ def main():
         st.session_state.logged_in = False
     if 'history_customer_id' not in st.session_state:
         st.session_state.history_customer_id = None
-    # NEW state variables for the corrected logic
     if 'customer_to_edit' not in st.session_state:
         st.session_state.customer_to_edit = None
     if 'customer_for_payment' not in st.session_state:
@@ -411,18 +410,15 @@ def main():
         elif choice == "Update/Delete Customer":
             st.subheader("Update or Delete Customer Information")
             
-            with st.form("find_customer_form"):
-                customer_id_to_find = st.number_input("Enter Customer ID to find", min_value=1, step=1)
-                submitted_find = st.form_submit_button("Find Customer")
+            customer_id_to_find = st.number_input("Enter Customer ID to find", min_value=1, step=1, key="find_cust_id_update")
 
-            if submitted_find:
+            if st.button("Find Customer"):
                 customer_data = get_customer_by_id(customer_id_to_find)
                 if customer_data is not None:
                     st.session_state.customer_to_edit = customer_data.to_dict()
                 else:
                     st.warning(f"No customer found with ID: {customer_id_to_find}")
-                    if 'customer_to_edit' in st.session_state:
-                         st.session_state.customer_to_edit = None
+                    st.session_state.customer_to_edit = None
             
             if st.session_state.get('customer_to_edit'):
                 customer_data = st.session_state.customer_to_edit
@@ -456,19 +452,16 @@ def main():
         elif choice == "Record Payment":
             st.subheader("Record a Customer Payment")
             
-            with st.form("find_customer_for_payment_form"):
-                customer_id_to_find = st.number_input("Enter Customer ID to find", min_value=1, step=1)
-                submitted_find = st.form_submit_button("Find Customer")
+            customer_id_to_find = st.number_input("Enter Customer ID to find", min_value=1, step=1, key="find_cust_id_payment")
 
-            if submitted_find:
+            if st.button("Find Customer"):
                 customer_data = get_customer_by_id(customer_id_to_find)
                 if customer_data is not None:
                     st.session_state.customer_for_payment = customer_data.to_dict()
                 else:
                     st.warning(f"No customer found with ID: {customer_id_to_find}")
-                    if 'customer_for_payment' in st.session_state:
-                        st.session_state.customer_for_payment = None
-            
+                    st.session_state.customer_for_payment = None
+
             if st.session_state.get('customer_for_payment'):
                 customer_data = st.session_state.customer_for_payment
                 selected_customer_id = customer_data['customer_id']
