@@ -289,8 +289,8 @@ def login_page():
     if login_as == "Admin":
         password = st.text_input("Password", type="password")
         if st.button("Login"):
-            # Simple hardcoded password check
-            if password == "admin":
+            # Check password against Streamlit secrets
+            if password == st.secrets.get("ADMIN_PASSWORD"):
                 st.session_state.logged_in = True
                 st.session_state.role = "Admin"
                 st.success("Logged in successfully as Admin!")
