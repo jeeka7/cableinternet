@@ -316,8 +316,12 @@ def main():
     """Main function to run the Streamlit app."""
     init_db()
 
+    # Initialize session state variables
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
+    if 'history_customer_id' not in st.session_state:
+        st.session_state.history_customer_id = None
+
 
     if not st.session_state.logged_in:
         login_page()
@@ -338,6 +342,10 @@ def main():
         update_pending_amounts() # Run auto-update only for Admin
         menu = ["View Customers", "Search Customer", "Add Customer", "Update/Delete Customer", "Record Payment", "Upcoming Renewals", "Payment History"]
         choice = st.sidebar.selectbox("Menu", menu)
+        
+        # Clear history search state if we navigate away from the page
+        if choice != "Payment History" and st.session_state.get('history_customer_id'):
+            st.session_state.history_customer_id = None
     else: # Customer View
         menu = ["My Details", "My Payment History"]
         choice = st.sidebar.selectbox("Menu", menu)
@@ -464,17 +472,34 @@ def main():
 
         elif choice == "Payment History":
             st.subheader("View Customer Payment History")
-            customer_id_to_view = st.number_input("Enter Customer ID to view payment history", min_value=1, step=1)
+            
+            customer_id_input = st.number_input("Enter Customer ID to view payment history", min_value=1, step=1)
+
             if st.button("View History"):
-                customer_data = get_customer_by_id(customer_id_to_view)
+                customer_data = get_customer_by_id(customer_id_input)
+                if customer_data is not None:
+                    # Store the valid ID in session state, which triggers a rerun
+                    st.session_state.history_customer_id = customer_id_input
+                else:
+                    # If ID is invalid, show a warning and clear the session state
+                    st.warning(f"No customer found with ID: {customer_id_input}")
+                    st.session_state.history_customer_id = None
+            
+            # This block now runs if a VALID customer ID has been found and stored in the session state
+            if st.session_state.get('history_customer_id'):
+                customer_id_to_view = st.session_state.history_customer_id
+                customer_data = get_customer_by_id(customer_id_to_view) # Fetch data again
+                
                 if customer_data is not None:
                     customer_name = customer_data['name']
                     history_df = get_payment_history_by_customer_id(customer_id_to_view)
+
                     if not history_df.empty:
                         st.write(f"#### History for {customer_name} (ID: {customer_id_to_view})")
                         display_df = history_df.copy()
                         display_df['payment_date'] = pd.to_datetime(display_df['payment_date']).dt.strftime('%d-%m-%Y')
                         st.dataframe(display_df.drop(columns=['customer_id', 'name']), use_container_width=True, hide_index=True)
+                        
                         if st.button("Generate History PDF"):
                             pdf_data = generate_payment_history_pdf(history_df, customer_name, customer_id_to_view)
                             b64 = base64.b64encode(pdf_data).decode()
@@ -482,8 +507,6 @@ def main():
                             st.markdown(href, unsafe_allow_html=True)
                     else:
                         st.info(f"No payment history for {customer_name}.")
-                else:
-                    st.warning(f"No customer found with ID: {customer_id_to_view}")
 
 
     # --- Customer Pages ---
