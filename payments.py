@@ -90,6 +90,50 @@ def delete_customer(customer_id):
     conn.commit()
     conn.close()
 
+def update_pending_amounts():
+    """Checks for overdue renewals and updates pending amounts and renewal dates automatically."""
+    conn = sqlite3.connect('isp_payments.db')
+    c = conn.cursor()
+    today = datetime.now().date()
+
+    # Fetch all customers that might need updating
+    c.execute("SELECT customer_id, per_month_cost, internet_renewal_date, pending_amount FROM customers WHERE internet_renewal_date IS NOT NULL")
+    customers_to_check = c.fetchall()
+
+    for customer in customers_to_check:
+        customer_id, per_month_cost, renewal_date_str, pending_amount = customer
+        
+        try:
+            renewal_date = datetime.strptime(renewal_date_str, '%Y-%m-%d').date()
+        except (ValueError, TypeError):
+            continue # Skip this customer if date is invalid
+
+        # If the renewal date is in the past, update it
+        if renewal_date < today:
+            months_past = 0
+            temp_renewal_date = renewal_date
+            # Calculate how many billing cycles have passed
+            while temp_renewal_date < today:
+                months_past += 1
+                # Move renewal date forward by 30 days for each cycle past due
+                temp_renewal_date += timedelta(days=30)
+            
+            if months_past > 0:
+                # Calculate the new pending amount
+                new_pending_amount = pending_amount + (per_month_cost * months_past)
+                # The new renewal date is the last calculated future date
+                new_renewal_date = temp_renewal_date
+                
+                # Update the database
+                c.execute('''
+                    UPDATE customers
+                    SET pending_amount = ?, internet_renewal_date = ?
+                    WHERE customer_id = ?
+                ''', (new_pending_amount, new_renewal_date.strftime('%Y-%m-%d'), customer_id))
+
+    conn.commit()
+    conn.close()
+
 def record_payment(customer_id, amount_paid):
     """Records a payment for a customer and updates their pending amount."""
     customer = get_customer_by_id(customer_id)
@@ -129,6 +173,7 @@ st.set_page_config(page_title="ISP Payment Manager", layout="wide")
 def main():
     """Main function to run the Streamlit app."""
     init_db()
+    update_pending_amounts() # Automatically update amounts on page load
     st.title("ISP Customer Payment Manager")
 
     menu = ["View Customers", "Search Customer", "Add Customer", "Update/Delete Customer", "Record Payment", "Upcoming Renewals"]
