@@ -323,6 +323,8 @@ def main():
         st.session_state.history_customer_id = None
     if 'edit_customer_id' not in st.session_state:
         st.session_state.edit_customer_id = None
+    if 'record_payment_customer_id' not in st.session_state:
+        st.session_state.record_payment_customer_id = None
 
 
     if not st.session_state.logged_in:
@@ -350,6 +352,8 @@ def main():
             st.session_state.history_customer_id = None
         if choice != "Update/Delete Customer" and st.session_state.get('edit_customer_id'):
             st.session_state.edit_customer_id = None
+        if choice != "Record Payment" and st.session_state.get('record_payment_customer_id'):
+            st.session_state.record_payment_customer_id = None
     else: # Customer View
         menu = ["My Details", "My Payment History"]
         choice = st.sidebar.selectbox("Menu", menu)
@@ -448,18 +452,32 @@ def main():
 
         elif choice == "Record Payment":
             st.subheader("Record a Customer Payment")
-            customers_df = get_all_customers()
-            if not customers_df.empty:
-                customer_list = [f"{row['customer_id']} - {row['name']} (Pending: ₹{row['pending_amount']:.2f})" for _, row in customers_df.iterrows()]
-                selected_customer_str = st.selectbox("Select a Customer", customer_list)
-                if selected_customer_str:
-                    selected_customer_id = int(selected_customer_str.split(" - ")[0])
+            
+            customer_id_input = st.number_input("Enter Customer ID to Record Payment for", min_value=1, step=1)
+
+            if st.button("Find Customer for Payment"):
+                customer_data = get_customer_by_id(customer_id_input)
+                if customer_data is not None:
+                    st.session_state.record_payment_customer_id = customer_id_input
+                else:
+                    st.warning(f"No customer found with ID: {customer_id_input}")
+                    st.session_state.record_payment_customer_id = None
+            
+            if st.session_state.get('record_payment_customer_id'):
+                selected_customer_id = st.session_state.record_payment_customer_id
+                customer_data = get_customer_by_id(selected_customer_id)
+
+                if customer_data is not None:
+                    st.write(f"**Recording payment for:** {customer_data['name']} (ID: {selected_customer_id})")
+                    st.write(f"**Current Pending Amount:** ₹{customer_data['pending_amount']:.2f}")
+
                     with st.form("payment_form", clear_on_submit=True):
                         amount_paid = st.number_input("Amount Paid (₹)", min_value=0.01, step=50.0)
                         payment_date = st.date_input("Payment Date", value=datetime.now().date())
                         if st.form_submit_button("Record Payment"):
                             if record_payment(selected_customer_id, amount_paid, payment_date):
                                 st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}.")
+                                st.session_state.record_payment_customer_id = None # Clear state after recording
                             else:
                                 st.error("Failed to record payment.")
         
