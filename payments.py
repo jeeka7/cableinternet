@@ -8,6 +8,7 @@ def init_db():
     """Initializes the SQLite database and creates the customers table if it doesn't exist."""
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
+    # Removed bill_date column
     c.execute('''
         CREATE TABLE IF NOT EXISTS customers (
             customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -16,7 +17,6 @@ def init_db():
             address TEXT,
             plan_details TEXT,
             per_month_cost REAL,
-            bill_date INTEGER,
             internet_renewal_date DATE,
             pending_amount REAL DEFAULT 0.0
         )
@@ -25,14 +25,15 @@ def init_db():
     conn.close()
 
 # --- Database Operations ---
-def add_customer(name, mobile, address, plan_details, per_month_cost, bill_date, internet_renewal_date, pending_amount):
+def add_customer(name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount):
     """Adds a new customer to the database."""
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
+    # Removed bill_date from query
     c.execute('''
-        INSERT INTO customers (name, mobile, address, plan_details, per_month_cost, bill_date, internet_renewal_date, pending_amount)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    ''', (name, mobile, address, plan_details, per_month_cost, bill_date, internet_renewal_date, pending_amount))
+        INSERT INTO customers (name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    ''', (name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount))
     conn.commit()
     conn.close()
 
@@ -51,16 +52,17 @@ def get_customer_by_id(customer_id):
     return customer.iloc[0] if not customer.empty else None
 
 
-def update_customer(customer_id, name, mobile, address, plan_details, per_month_cost, bill_date, internet_renewal_date, pending_amount):
+def update_customer(customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount):
     """Updates an existing customer's details."""
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
+    # Removed bill_date from query
     c.execute('''
         UPDATE customers
         SET name = ?, mobile = ?, address = ?, plan_details = ?, per_month_cost = ?,
-            bill_date = ?, internet_renewal_date = ?, pending_amount = ?
+            internet_renewal_date = ?, pending_amount = ?
         WHERE customer_id = ?
-    ''', (name, mobile, address, plan_details, per_month_cost, bill_date, internet_renewal_date, pending_amount, customer_id))
+    ''', (name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount, customer_id))
     conn.commit()
     conn.close()
 
@@ -97,6 +99,13 @@ def record_payment(customer_id, amount_paid):
     return False
 
 
+# --- Helper function for date formatting ---
+def format_df_dates(df, date_column='internet_renewal_date'):
+    """Formats a DataFrame's date column to DD-MM-YYYY."""
+    df_display = df.copy()
+    df_display[date_column] = pd.to_datetime(df_display[date_column]).dt.strftime('%d-%m-%Y')
+    return df_display
+
 # --- Streamlit UI ---
 st.set_page_config(page_title="ISP Payment Manager", layout="wide")
 
@@ -105,13 +114,37 @@ def main():
     init_db()
     st.title("ISP Customer Payment Manager")
 
-    menu = ["View Customers", "Add Customer", "Update/Delete Customer", "Record Payment", "Upcoming Renewals"]
+    menu = ["View Customers", "Search Customer", "Add Customer", "Update/Delete Customer", "Record Payment", "Upcoming Renewals"]
     choice = st.sidebar.selectbox("Menu", menu)
 
     if choice == "View Customers":
         st.subheader("All Customers")
         customers_df = get_all_customers()
-        st.dataframe(customers_df, use_container_width=True)
+        if not customers_df.empty:
+            display_df = format_df_dates(customers_df)
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No customers found. Add a customer to get started.")
+
+    elif choice == "Search Customer":
+        st.subheader("Search for a Customer")
+        customers_df = get_all_customers()
+        if not customers_df.empty:
+            customer_id_to_search = st.number_input("Enter Customer ID to view details", min_value=1, step=1)
+            if st.button("Search"):
+                customer_data = get_customer_by_id(customer_id_to_search)
+                if customer_data is not None:
+                    st.success(f"Displaying details for Customer ID: {customer_id_to_search}")
+                    # Transpose for better single-record view and format date
+                    customer_df = pd.DataFrame(customer_data).transpose()
+                    customer_df.columns = customer_data.index
+                    display_df = format_df_dates(customer_df)
+                    st.dataframe(display_df, use_container_width=True, hide_index=True)
+                else:
+                    st.warning(f"No customer found with ID: {customer_id_to_search}")
+        else:
+            st.info("No customers in the database to search.")
+
 
     elif choice == "Add Customer":
         st.subheader("Add a New Customer")
@@ -121,14 +154,13 @@ def main():
             address = st.text_area("Address", placeholder="123 Main St, City")
             plan_details = st.text_input("Plan Details", placeholder="Unlimited 50Mbps")
             per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, step=50.0)
-            bill_date = st.number_input("Billing Day of Month", min_value=1, max_value=31, step=1, value=1)
             internet_renewal_date = st.date_input("Internet Renewal Date")
             pending_amount = st.number_input("Initial Pending Amount (₹)", min_value=0.0, step=100.0)
 
             submitted = st.form_submit_button("Add Customer")
             if submitted:
                 if name:
-                    add_customer(name, mobile, address, plan_details, per_month_cost, bill_date, internet_renewal_date, pending_amount)
+                    add_customer(name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
                     st.success(f"Customer '{name}' added successfully!")
                 else:
                     st.warning("Customer name is required.")
@@ -139,7 +171,7 @@ def main():
         if not customers_df.empty:
             customer_list = [f"{row['customer_id']} - {row['name']}" for index, row in customers_df.iterrows()]
             selected_customer_str = st.selectbox("Select a Customer", customer_list)
-            
+
             if selected_customer_str:
                 selected_customer_id = int(selected_customer_str.split(" - ")[0])
                 customer_data = get_customer_by_id(selected_customer_id)
@@ -151,8 +183,7 @@ def main():
                     address = st.text_area("Address", value=customer_data['address'])
                     plan_details = st.text_input("Plan Details", value=customer_data['plan_details'])
                     per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, step=50.0, value=float(customer_data['per_month_cost']))
-                    bill_date = st.number_input("Billing Day of Month", min_value=1, max_value=31, step=1, value=int(customer_data['bill_date']))
-                    
+
                     try:
                         renewal_date_val = datetime.strptime(customer_data['internet_renewal_date'], '%Y-%m-%d').date()
                     except (TypeError, ValueError):
@@ -168,9 +199,9 @@ def main():
                         delete_button = st.form_submit_button("Delete Customer")
 
                     if update_button:
-                        update_customer(selected_customer_id, name, mobile, address, plan_details, per_month_cost, bill_date, internet_renewal_date, pending_amount)
+                        update_customer(selected_customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
                         st.success(f"Customer ID {selected_customer_id} updated successfully!")
-                    
+
                     if delete_button:
                         delete_customer(selected_customer_id)
                         st.warning(f"Customer ID {selected_customer_id} has been deleted.")
@@ -185,7 +216,7 @@ def main():
 
             if selected_customer_str:
                 selected_customer_id = int(selected_customer_str.split(" - ")[0])
-                
+
                 with st.form("payment_form", clear_on_submit=True):
                     amount_paid = st.number_input("Amount Paid (₹)", min_value=0.01, step=50.0)
                     payment_button = st.form_submit_button("Record Payment")
@@ -195,31 +226,43 @@ def main():
                             st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}. Renewal date and pending amount updated.")
                         else:
                             st.error("Failed to record payment.")
-    
+
     elif choice == "Upcoming Renewals":
         st.subheader("Upcoming Renewals")
         customers_df = get_all_customers()
         if not customers_df.empty:
             try:
                 customers_df['internet_renewal_date'] = pd.to_datetime(customers_df['internet_renewal_date'])
-                today = datetime.now()
+                today = pd.Timestamp.now().floor('D') # Use pandas Timestamp for comparison
                 next_10_days = today + timedelta(days=10)
-                
+
                 upcoming_renewals = customers_df[
-                    (customers_df['internet_renewal_date'] >= today) & 
+                    (customers_df['internet_renewal_date'] >= today) &
                     (customers_df['internet_renewal_date'] <= next_10_days)
                 ].sort_values(by='internet_renewal_date')
 
                 st.write("Renewals in the next 10 days:")
-                st.dataframe(upcoming_renewals, use_container_width=True)
+                if not upcoming_renewals.empty:
+                    display_upcoming = format_df_dates(upcoming_renewals)
+                    st.dataframe(display_upcoming, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No upcoming renewals in the next 10 days.")
 
                 past_due = customers_df[customers_df['internet_renewal_date'] < today].sort_values(by='internet_renewal_date')
                 st.write("Past Due Renewals:")
-                st.dataframe(past_due, use_container_width=True)
+                if not past_due.empty:
+                    display_past_due = format_df_dates(past_due)
+                    st.dataframe(display_past_due, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No customers with past due renewals.")
+
 
             except Exception as e:
                 st.error(f"An error occurred while processing dates: {e}")
+        else:
+            st.info("No customers found.")
 
 
 if __name__ == '__main__':
     main()
+
