@@ -3,6 +3,7 @@ import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
 from fpdf import FPDF
+import base64
 
 # --- PDF Generation ---
 class PDF(FPDF):
@@ -236,10 +237,13 @@ def main():
             display_df = format_df_dates(customers_df_no_address)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
             
-            if st.button("Generate & View PDF Report"):
+            if st.button("Generate PDF Report for Download"):
                 with st.spinner('Generating PDF...'):
                     pdf_data = generate_pdf(customers_df[['name', 'pending_amount']])
-                    st.pdf(pdf_data)
+                    b64 = base64.b64encode(pdf_data).decode()
+                    href = f'<a href="data:application/pdf;base64,{b64}" download="pending_amounts_{datetime.now().strftime("%Y%m%d")}.pdf">Click here to download your report</a>'
+                    st.success("PDF Generated!")
+                    st.markdown(href, unsafe_allow_html=True)
 
         else:
             st.info("No customers found. Add a customer to get started.")
