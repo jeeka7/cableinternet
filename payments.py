@@ -5,10 +5,10 @@ from datetime import datetime, timedelta
 
 # --- Database Setup ---
 def init_db():
-    """Initializes the SQLite database and creates the customers table if it doesn't exist."""
+    """Initializes the SQLite database and creates/updates the customers table."""
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
-    # Removed bill_date column
+    # Create table if it doesn't exist
     c.execute('''
         CREATE TABLE IF NOT EXISTS customers (
             customer_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,8 +21,24 @@ def init_db():
             pending_amount REAL DEFAULT 0.0
         )
     ''')
+
+    # --- Migration: Check if bill_date column exists and drop it safely ---
+    try:
+        c.execute("PRAGMA table_info(customers)")
+        columns = [row[1] for row in c.fetchall()]
+        if 'bill_date' in columns:
+            # Use the safe method to drop a column in SQLite
+            c.execute('CREATE TABLE customers_new AS SELECT customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount FROM customers')
+            c.execute('DROP TABLE customers')
+            c.execute('ALTER TABLE customers_new RENAME TO customers')
+            st.toast("Database schema updated: 'bill_date' column removed successfully.")
+    except Exception:
+        # This will prevent errors if the table is brand new or already migrated.
+        pass
+
     conn.commit()
     conn.close()
+
 
 # --- Database Operations ---
 def add_customer(name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount):
@@ -103,7 +119,8 @@ def record_payment(customer_id, amount_paid):
 def format_df_dates(df, date_column='internet_renewal_date'):
     """Formats a DataFrame's date column to DD-MM-YYYY."""
     df_display = df.copy()
-    df_display[date_column] = pd.to_datetime(df_display[date_column]).dt.strftime('%d-%m-%Y')
+    if date_column in df_display.columns:
+        df_display[date_column] = pd.to_datetime(df_display[date_column]).dt.strftime('%d-%m-%Y')
     return df_display
 
 # --- Streamlit UI ---
