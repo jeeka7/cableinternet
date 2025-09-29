@@ -45,7 +45,8 @@ def generate_pdf(df):
     pdf.set_font('Helvetica', 'I', 10)
     pdf.cell(0, 10, f"Report generated on: {datetime.now().strftime('%d-%m-%Y')}", 0, 1, 'L')
     
-    return pdf.output(dest='S').encode('latin-1')
+    # Return PDF as bytes, which is the expected format for st.download_button
+    return pdf.output()
 
 
 # --- Database Setup ---
