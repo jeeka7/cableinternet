@@ -495,7 +495,9 @@ def main():
             if customer_data is not None:
                 customer_df = pd.DataFrame(customer_data).transpose()
                 customer_df.columns = customer_data.index
-                st.dataframe(format_df_dates(customer_df), use_container_width=True, hide_index=True)
+                # Drop sensitive columns for customer view
+                customer_display_df = customer_df.drop(columns=['mobile', 'address'])
+                st.dataframe(format_df_dates(customer_display_df), use_container_width=True, hide_index=True)
             else:
                 st.error("Could not retrieve your details.")
 
