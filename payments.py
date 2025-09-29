@@ -321,6 +321,8 @@ def main():
         st.session_state.logged_in = False
     if 'history_customer_id' not in st.session_state:
         st.session_state.history_customer_id = None
+    if 'edit_customer_id' not in st.session_state:
+        st.session_state.edit_customer_id = None
 
 
     if not st.session_state.logged_in:
@@ -343,9 +345,11 @@ def main():
         menu = ["View Customers", "Search Customer", "Add Customer", "Update/Delete Customer", "Record Payment", "Upcoming Renewals", "Payment History"]
         choice = st.sidebar.selectbox("Menu", menu)
         
-        # Clear history search state if we navigate away from the page
+        # Clear search states if we navigate away from the page
         if choice != "Payment History" and st.session_state.get('history_customer_id'):
             st.session_state.history_customer_id = None
+        if choice != "Update/Delete Customer" and st.session_state.get('edit_customer_id'):
+            st.session_state.edit_customer_id = None
     else: # Customer View
         menu = ["My Details", "My Payment History"]
         choice = st.sidebar.selectbox("Menu", menu)
@@ -402,13 +406,22 @@ def main():
 
         elif choice == "Update/Delete Customer":
             st.subheader("Update or Delete Customer Information")
-            customers_df = get_all_customers()
-            if not customers_df.empty:
-                customer_list = [f"{row['customer_id']} - {row['name']}" for _, row in customers_df.iterrows()]
-                selected_customer_str = st.selectbox("Select a Customer", customer_list)
-                if selected_customer_str:
-                    selected_customer_id = int(selected_customer_str.split(" - ")[0])
-                    customer_data = get_customer_by_id(selected_customer_id)
+            
+            customer_id_input = st.number_input("Enter Customer ID to Update or Delete", min_value=1, step=1)
+
+            if st.button("Find Customer"):
+                customer_data = get_customer_by_id(customer_id_input)
+                if customer_data is not None:
+                    st.session_state.edit_customer_id = customer_id_input
+                else:
+                    st.warning(f"No customer found with ID: {customer_id_input}")
+                    st.session_state.edit_customer_id = None
+            
+            if st.session_state.get('edit_customer_id'):
+                selected_customer_id = st.session_state.edit_customer_id
+                customer_data = get_customer_by_id(selected_customer_id)
+                
+                if customer_data is not None:
                     with st.form("update_customer_form"):
                         st.write(f"**Editing Customer ID:** {customer_data['customer_id']}")
                         name = st.text_input("Name", value=customer_data['name'])
@@ -424,11 +437,14 @@ def main():
                         if col1.form_submit_button("Update Customer"):
                             update_customer(selected_customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
                             st.success(f"Customer ID {selected_customer_id} updated successfully!")
+                            st.session_state.edit_customer_id = None # Clear state
                             st.rerun()
                         if col2.form_submit_button("Delete Customer"):
                             delete_customer(selected_customer_id)
                             st.warning(f"Customer ID {selected_customer_id} has been deleted.")
+                            st.session_state.edit_customer_id = None # Clear state
                             st.rerun()
+
 
         elif choice == "Record Payment":
             st.subheader("Record a Customer Payment")
