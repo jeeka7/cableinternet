@@ -25,8 +25,9 @@ def generate_pdf(df):
     pdf.add_page()
     pdf.set_font('Helvetica', 'B', 12)
     
-    # Table Header
-    pdf.cell(130, 10, 'Customer Name', 1, 0, 'C')
+    # Table Header - Added Customer ID and adjusted widths
+    pdf.cell(30, 10, 'Cust. ID', 1, 0, 'C')
+    pdf.cell(100, 10, 'Customer Name', 1, 0, 'C')
     pdf.cell(60, 10, 'Pending Amount (Rs)', 1, 1, 'C')
     
     pdf.set_font('Helvetica', '', 11)
@@ -34,10 +35,11 @@ def generate_pdf(df):
     for index, row in df.iterrows():
         # Sanitize name for the PDF's default font encoding (latin-1) to prevent errors
         name = str(row['name']).encode('latin-1', 'replace').decode('latin-1')
-        pdf.cell(130, 10, name, 1, 0)
+        pdf.cell(30, 10, str(row['customer_id']), 1, 0, 'C')
+        pdf.cell(100, 10, name, 1, 0)
         pdf.cell(60, 10, f"{row['pending_amount']:.2f}", 1, 1, 'R')
         
-    # Total Calculation
+    # Total Calculation - Adjusted to span correctly
     total_pending = df['pending_amount'].sum()
     pdf.set_font('Helvetica', 'B', 12)
     pdf.cell(130, 10, 'Total Pending Amount', 1, 0, 'R')
@@ -239,7 +241,8 @@ def main():
             
             if st.button("Generate PDF Report for Download"):
                 with st.spinner('Generating PDF...'):
-                    pdf_data = generate_pdf(customers_df[['name', 'pending_amount']])
+                    # Pass customer_id to the PDF generation function
+                    pdf_data = generate_pdf(customers_df[['customer_id', 'name', 'pending_amount']])
                     b64 = base64.b64encode(pdf_data).decode()
                     href = f'<a href="data:application/pdf;base64,{b64}" download="pending_amounts_{datetime.now().strftime("%Y%m%d")}.pdf">Click here to download your report</a>'
                     st.success("PDF Generated!")
