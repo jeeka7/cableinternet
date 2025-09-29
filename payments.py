@@ -159,9 +159,10 @@ def get_all_customers():
 def get_customer_by_id(customer_id):
     """Retrieves a single customer by their ID."""
     conn = sqlite3.connect('isp_payments.db')
-    customer = pd.read_sql_query(f"SELECT * FROM customers WHERE customer_id = {customer_id}", conn)
+    # Use parameters to prevent SQL injection
+    customer_df = pd.read_sql_query("SELECT * FROM customers WHERE customer_id = ?", conn, params=(customer_id,))
     conn.close()
-    return customer.iloc[0] if not customer.empty else None
+    return customer_df.iloc[0] if not customer_df.empty else None
 
 def get_payment_history_by_customer_id(customer_id):
     """Retrieves payment history for a specific customer, including their name."""
@@ -174,10 +175,10 @@ def get_payment_history_by_customer_id(customer_id):
             ph.payment_date
         FROM payment_history ph
         JOIN customers c ON ph.customer_id = c.customer_id
-        WHERE ph.customer_id = {customer_id}
+        WHERE ph.customer_id = ?
         ORDER BY ph.payment_date DESC
     """
-    df = pd.read_sql_query(query, conn)
+    df = pd.read_sql_query(query, conn, params=(customer_id,))
     conn.close()
     return df
 
@@ -200,6 +201,7 @@ def delete_customer(customer_id):
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
     c.execute("DELETE FROM customers WHERE customer_id = ?", (customer_id,))
+    c.execute("DELETE FROM payment_history WHERE customer_id = ?", (customer_id,)) # Also delete payment history
     conn.commit()
     conn.close()
 
@@ -223,8 +225,12 @@ def update_pending_amounts():
             temp_renewal_date = renewal_date
             while temp_renewal_date < today:
                 months_past += 1
-                temp_renewal_date += timedelta(days=30)
-            
+                # A more robust way to increment months
+                if temp_renewal_date.month == 12:
+                    temp_renewal_date = temp_renewal_date.replace(year=temp_renewal_date.year + 1, month=1)
+                else:
+                    temp_renewal_date = temp_renewal_date.replace(month=temp_renewal_date.month + 1)
+
             if months_past > 0:
                 new_pending_amount = pending_amount + (per_month_cost * months_past)
                 new_renewal_date = temp_renewal_date
@@ -241,21 +247,18 @@ def record_payment(customer_id, amount_paid, payment_date):
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
     try:
-        c.execute("SELECT pending_amount, internet_renewal_date FROM customers WHERE customer_id = ?", (customer_id,))
+        c.execute("SELECT pending_amount FROM customers WHERE customer_id = ?", (customer_id,))
         customer_data = c.fetchone()
         if customer_data:
-            current_pending_amount, current_renewal_date_str = customer_data
+            current_pending_amount = customer_data[0]
             new_pending_amount = current_pending_amount - amount_paid
-            try:
-                current_renewal_date = datetime.strptime(current_renewal_date_str, '%Y-%m-%d').date()
-                new_renewal_date = current_renewal_date + timedelta(days=30)
-            except (ValueError, TypeError):
-                new_renewal_date = datetime.now().date() + timedelta(days=30)
+            
             c.execute('''
                 UPDATE customers
-                SET pending_amount = ?, internet_renewal_date = ?
+                SET pending_amount = ?
                 WHERE customer_id = ?
-            ''', (new_pending_amount, new_renewal_date.strftime('%Y-%m-%d'), customer_id))
+            ''', (new_pending_amount, customer_id))
+            
             c.execute('''
                 INSERT INTO payment_history (customer_id, payment_amount, payment_date)
                 VALUES (?, ?, ?)
@@ -272,43 +275,94 @@ def record_payment(customer_id, amount_paid, payment_date):
 def format_df_dates(df, date_column='internet_renewal_date'):
     """Formats a DataFrame's date column to DD-MM-YYYY."""
     df_display = df.copy()
-    if date_column in df_display.columns:
+    if date_column in df_display.columns and not df_display.empty:
         df_display[date_column] = pd.to_datetime(df_display[date_column]).dt.strftime('%d-%m-%Y')
     return df_display
 
-# --- Streamlit UI ---
+# --- Login and UI ---
 st.set_page_config(page_title="ISP Payment Manager", layout="wide")
+
+def login_page():
+    st.header("Login")
+    login_as = st.radio("Login as:", ("Admin", "Customer"))
+
+    if login_as == "Admin":
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            # Simple hardcoded password check
+            if password == "admin":
+                st.session_state.logged_in = True
+                st.session_state.role = "Admin"
+                st.success("Logged in successfully as Admin!")
+                st.rerun()
+            else:
+                st.error("Incorrect password")
+    
+    elif login_as == "Customer":
+        customer_id = st.number_input("Enter your Customer ID", min_value=1, step=1)
+        if st.button("Login"):
+            customer = get_customer_by_id(customer_id)
+            if customer is not None:
+                st.session_state.logged_in = True
+                st.session_state.role = "Customer"
+                st.session_state.customer_id = customer_id
+                st.session_state.customer_name = customer['name']
+                st.success(f"Logged in successfully as {st.session_state.customer_name}!")
+                st.rerun()
+            else:
+                st.error("Customer ID not found.")
 
 def main():
     """Main function to run the Streamlit app."""
     init_db()
-    update_pending_amounts() # Automatically update amounts on page load
+
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+
+    if not st.session_state.logged_in:
+        login_page()
+        return
+
+    # --- Main App for Logged-in Users ---
+    
+    st.sidebar.title(f"Welcome, {st.session_state.get('customer_name', 'Admin')}!")
+    if st.sidebar.button("Logout"):
+        for key in list(st.session_state.keys()):
+            del st.session_state[key]
+        st.rerun()
+
     st.title("ISP Customer Payment Manager")
+    
+    # --- Role-Based Menu ---
+    if st.session_state.role == "Admin":
+        update_pending_amounts() # Run auto-update only for Admin
+        menu = ["View Customers", "Search Customer", "Add Customer", "Update/Delete Customer", "Record Payment", "Upcoming Renewals", "Payment History"]
+        choice = st.sidebar.selectbox("Menu", menu)
+    else: # Customer View
+        menu = ["My Details", "My Payment History"]
+        choice = st.sidebar.selectbox("Menu", menu)
 
-    menu = ["View Customers", "Search Customer", "Add Customer", "Update/Delete Customer", "Record Payment", "Upcoming Renewals", "Payment History"]
-    choice = st.sidebar.selectbox("Menu", menu)
+    # --- Admin Pages ---
+    if st.session_state.role == "Admin":
+        if choice == "View Customers":
+            st.subheader("All Customers")
+            customers_df = get_all_customers()
+            if not customers_df.empty:
+                customers_df_no_address = customers_df.drop(columns=['address'])
+                display_df = format_df_dates(customers_df_no_address)
+                st.dataframe(display_df, use_container_width=True, hide_index=True)
+                if st.button("Generate PDF Report for Download"):
+                    with st.spinner('Generating PDF...'):
+                        pdf_data = generate_pdf(customers_df[['customer_id', 'name', 'pending_amount']])
+                        b64 = base64.b64encode(pdf_data).decode()
+                        href = f'<a href="data:application/pdf;base64,{b64}" download="pending_amounts_{datetime.now().strftime("%Y%m%d")}.pdf">Click here to download your report</a>'
+                        st.success("PDF Generated!")
+                        st.markdown(href, unsafe_allow_html=True)
+            else:
+                st.info("No customers found. Add a customer to get started.")
 
-    if choice == "View Customers":
-        st.subheader("All Customers")
-        customers_df = get_all_customers()
-        if not customers_df.empty:
-            customers_df_no_address = customers_df.drop(columns=['address'])
-            display_df = format_df_dates(customers_df_no_address)
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-            if st.button("Generate PDF Report for Download"):
-                with st.spinner('Generating PDF...'):
-                    pdf_data = generate_pdf(customers_df[['customer_id', 'name', 'pending_amount']])
-                    b64 = base64.b64encode(pdf_data).decode()
-                    href = f'<a href="data:application/pdf;base64,{b64}" download="pending_amounts_{datetime.now().strftime("%Y%m%d")}.pdf">Click here to download your report</a>'
-                    st.success("PDF Generated!")
-                    st.markdown(href, unsafe_allow_html=True)
-        else:
-            st.info("No customers found. Add a customer to get started.")
-
-    elif choice == "Search Customer":
-        st.subheader("Search for a Customer")
-        customers_df = get_all_customers()
-        if not customers_df.empty:
+        elif choice == "Search Customer":
+            st.subheader("Search for a Customer")
             customer_id_to_search = st.number_input("Enter Customer ID to view details", min_value=1, step=1)
             if st.button("Search"):
                 customer_data = get_customer_by_id(customer_id_to_search)
@@ -320,133 +374,145 @@ def main():
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
                     st.warning(f"No customer found with ID: {customer_id_to_search}")
-        else:
-            st.info("No customers in the database to search.")
 
-    elif choice == "Add Customer":
-        st.subheader("Add a New Customer")
-        with st.form("add_customer_form", clear_on_submit=True):
-            name = st.text_input("Name", placeholder="John Doe")
-            mobile = st.text_input("Mobile Number", placeholder="9876543210")
-            address = st.text_area("Address", placeholder="123 Main St, City")
-            plan_details = st.text_input("Plan Details", placeholder="Unlimited 50Mbps")
-            per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, step=50.0)
-            internet_renewal_date = st.date_input("Internet Renewal Date")
-            pending_amount = st.number_input("Initial Pending Amount (₹)", min_value=0.0, step=100.0)
-            submitted = st.form_submit_button("Add Customer")
-            if submitted:
-                if name:
+        elif choice == "Add Customer":
+            st.subheader("Add a New Customer")
+            with st.form("add_customer_form", clear_on_submit=True):
+                name = st.text_input("Name", placeholder="John Doe")
+                mobile = st.text_input("Mobile Number", placeholder="9876543210")
+                address = st.text_area("Address", placeholder="123 Main St, City")
+                plan_details = st.text_input("Plan Details", placeholder="Unlimited 50Mbps")
+                per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, step=50.0)
+                internet_renewal_date = st.date_input("Internet Renewal Date")
+                pending_amount = st.number_input("Initial Pending Amount (₹)", min_value=0.0, step=100.0)
+                submitted = st.form_submit_button("Add Customer")
+                if submitted and name:
                     add_customer(name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
                     st.success(f"Customer '{name}' added successfully!")
-                else:
+                elif submitted:
                     st.warning("Customer name is required.")
 
-    elif choice == "Update/Delete Customer":
-        st.subheader("Update or Delete Customer Information")
-        customers_df = get_all_customers()
-        if not customers_df.empty:
-            customer_list = [f"{row['customer_id']} - {row['name']}" for index, row in customers_df.iterrows()]
-            selected_customer_str = st.selectbox("Select a Customer", customer_list)
-            if selected_customer_str:
-                selected_customer_id = int(selected_customer_str.split(" - ")[0])
-                customer_data = get_customer_by_id(selected_customer_id)
-                with st.form("update_customer_form"):
-                    st.write(f"**Editing Customer ID:** {customer_data['customer_id']}")
-                    name = st.text_input("Name", value=customer_data['name'])
-                    mobile = st.text_input("Mobile Number", value=customer_data['mobile'])
-                    address = st.text_area("Address", value=customer_data['address'])
-                    plan_details = st.text_input("Plan Details", value=customer_data['plan_details'])
-                    per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, step=50.0, value=float(customer_data['per_month_cost']))
-                    try:
-                        renewal_date_val = datetime.strptime(customer_data['internet_renewal_date'], '%Y-%m-%d').date()
-                    except (TypeError, ValueError):
-                        renewal_date_val = datetime.now().date()
-                    internet_renewal_date = st.date_input("Internet Renewal Date", value=renewal_date_val)
-                    pending_amount = st.number_input("Pending Amount (₹)", min_value=0.0, step=100.0, value=float(customer_data['pending_amount']))
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        update_button = st.form_submit_button("Update Customer")
-                    with col2:
-                        delete_button = st.form_submit_button("Delete Customer")
-                    if update_button:
-                        update_customer(selected_customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
-                        st.success(f"Customer ID {selected_customer_id} updated successfully!")
-                    if delete_button:
-                        delete_customer(selected_customer_id)
-                        st.warning(f"Customer ID {selected_customer_id} has been deleted.")
-                        st.rerun()
+        elif choice == "Update/Delete Customer":
+            st.subheader("Update or Delete Customer Information")
+            customers_df = get_all_customers()
+            if not customers_df.empty:
+                customer_list = [f"{row['customer_id']} - {row['name']}" for _, row in customers_df.iterrows()]
+                selected_customer_str = st.selectbox("Select a Customer", customer_list)
+                if selected_customer_str:
+                    selected_customer_id = int(selected_customer_str.split(" - ")[0])
+                    customer_data = get_customer_by_id(selected_customer_id)
+                    with st.form("update_customer_form"):
+                        st.write(f"**Editing Customer ID:** {customer_data['customer_id']}")
+                        name = st.text_input("Name", value=customer_data['name'])
+                        mobile = st.text_input("Mobile Number", value=customer_data['mobile'])
+                        address = st.text_area("Address", value=customer_data['address'])
+                        plan_details = st.text_input("Plan Details", value=customer_data['plan_details'])
+                        per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, value=float(customer_data['per_month_cost']))
+                        renewal_date_val = datetime.strptime(customer_data['internet_renewal_date'], '%Y-%m-%d').date() if customer_data['internet_renewal_date'] else datetime.now().date()
+                        internet_renewal_date = st.date_input("Internet Renewal Date", value=renewal_date_val)
+                        pending_amount = st.number_input("Pending Amount (₹)", min_value=0.0, value=float(customer_data['pending_amount']))
+                        
+                        col1, col2 = st.columns(2)
+                        if col1.form_submit_button("Update Customer"):
+                            update_customer(selected_customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
+                            st.success(f"Customer ID {selected_customer_id} updated successfully!")
+                            st.rerun()
+                        if col2.form_submit_button("Delete Customer"):
+                            delete_customer(selected_customer_id)
+                            st.warning(f"Customer ID {selected_customer_id} has been deleted.")
+                            st.rerun()
 
-    elif choice == "Record Payment":
-        st.subheader("Record a Customer Payment")
-        customers_df = get_all_customers()
-        if not customers_df.empty:
-            customer_list = [f"{row['customer_id']} - {row['name']} (Pending: ₹{row['pending_amount']})" for index, row in customers_df.iterrows()]
-            selected_customer_str = st.selectbox("Select a Customer", customer_list)
-            if selected_customer_str:
-                selected_customer_id = int(selected_customer_str.split(" - ")[0])
-                with st.form("payment_form", clear_on_submit=True):
-                    amount_paid = st.number_input("Amount Paid (₹)", min_value=0.01, step=50.0)
-                    payment_date = st.date_input("Payment Date", value=datetime.now().date())
-                    payment_button = st.form_submit_button("Record Payment")
-                    if payment_button:
-                        if record_payment(selected_customer_id, amount_paid, payment_date):
-                            st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}. Renewal date and pending amount updated.")
-                        else:
-                            st.error("Failed to record payment.")
-
-    elif choice == "Upcoming Renewals":
-        st.subheader("Upcoming Renewals")
-        customers_df = get_all_customers()
-        if not customers_df.empty:
-            try:
-                customers_df['internet_renewal_date'] = pd.to_datetime(customers_df['internet_renewal_date'])
+        elif choice == "Record Payment":
+            st.subheader("Record a Customer Payment")
+            customers_df = get_all_customers()
+            if not customers_df.empty:
+                customer_list = [f"{row['customer_id']} - {row['name']} (Pending: ₹{row['pending_amount']:.2f})" for _, row in customers_df.iterrows()]
+                selected_customer_str = st.selectbox("Select a Customer", customer_list)
+                if selected_customer_str:
+                    selected_customer_id = int(selected_customer_str.split(" - ")[0])
+                    with st.form("payment_form", clear_on_submit=True):
+                        amount_paid = st.number_input("Amount Paid (₹)", min_value=0.01, step=50.0)
+                        payment_date = st.date_input("Payment Date", value=datetime.now().date())
+                        if st.form_submit_button("Record Payment"):
+                            if record_payment(selected_customer_id, amount_paid, payment_date):
+                                st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}.")
+                            else:
+                                st.error("Failed to record payment.")
+        
+        elif choice == "Upcoming Renewals":
+            st.subheader("Upcoming Renewals")
+            customers_df = get_all_customers()
+            if not customers_df.empty:
+                customers_df['internet_renewal_date'] = pd.to_datetime(customers_df['internet_renewal_date'], errors='coerce')
+                customers_df.dropna(subset=['internet_renewal_date'], inplace=True) # Drop rows where date conversion failed
                 today = pd.Timestamp.now().floor('D')
                 next_10_days = today + timedelta(days=10)
-                upcoming_renewals = customers_df[(customers_df['internet_renewal_date'] >= today) & (customers_df['internet_renewal_date'] <= next_10_days)].sort_values(by='internet_renewal_date')
+
                 st.write("Renewals in the next 10 days:")
-                if not upcoming_renewals.empty:
-                    display_upcoming = format_df_dates(upcoming_renewals)
-                    st.dataframe(display_upcoming, use_container_width=True, hide_index=True)
+                upcoming = customers_df[(customers_df['internet_renewal_date'] >= today) & (customers_df['internet_renewal_date'] <= next_10_days)].sort_values(by='internet_renewal_date')
+                if not upcoming.empty:
+                    st.dataframe(format_df_dates(upcoming), use_container_width=True, hide_index=True)
                 else:
                     st.info("No upcoming renewals in the next 10 days.")
-                past_due = customers_df[customers_df['internet_renewal_date'] < today].sort_values(by='internet_renewal_date')
+                
                 st.write("Past Due Renewals:")
+                past_due = customers_df[customers_df['internet_renewal_date'] < today].sort_values(by='internet_renewal_date')
                 if not past_due.empty:
-                    display_past_due = format_df_dates(past_due)
-                    st.dataframe(display_past_due, use_container_width=True, hide_index=True)
+                    st.dataframe(format_df_dates(past_due), use_container_width=True, hide_index=True)
                 else:
                     st.info("No customers with past due renewals.")
-            except Exception as e:
-                st.error(f"An error occurred while processing dates: {e}")
-        else:
-            st.info("No customers found.")
 
-    elif choice == "Payment History":
-        st.subheader("Customer Payment History")
-        customers_df = get_all_customers()
-        if not customers_df.empty:
-            customer_list = [f"{row['customer_id']} - {row['name']}" for index, row in customers_df.iterrows()]
-            selected_customer_str = st.selectbox("Select a Customer to view their payment history", customer_list)
-            if selected_customer_str:
-                selected_customer_id = int(selected_customer_str.split(" - ")[0])
-                customer_name = selected_customer_str.split(" - ")[1]
-                history_df = get_payment_history_by_customer_id(selected_customer_id)
-                if not history_df.empty:
-                    st.write(f"#### Displaying history for {customer_name}")
-                    display_history_df = history_df.copy()
-                    display_history_df['payment_date'] = pd.to_datetime(display_history_df['payment_date']).dt.strftime('%d-%m-%Y')
-                    st.dataframe(display_history_df[['customer_id', 'name', 'payment_amount', 'payment_date']], use_container_width=True, hide_index=True)
-                    if st.button("Generate History PDF for Download"):
-                        with st.spinner('Generating PDF...'):
+        elif choice == "Payment History":
+            st.subheader("View Customer Payment History")
+            customers_df = get_all_customers()
+            if not customers_df.empty:
+                customer_list = [f"{row['customer_id']} - {row['name']}" for _, row in customers_df.iterrows()]
+                selected_customer_str = st.selectbox("Select a Customer", customer_list)
+                if selected_customer_str:
+                    selected_customer_id = int(selected_customer_str.split(" - ")[0])
+                    customer_name = selected_customer_str.split(" - ")[1]
+                    history_df = get_payment_history_by_customer_id(selected_customer_id)
+                    if not history_df.empty:
+                        st.write(f"#### History for {customer_name}")
+                        display_df = history_df.copy()
+                        display_df['payment_date'] = pd.to_datetime(display_df['payment_date']).dt.strftime('%d-%m-%Y')
+                        st.dataframe(display_df.drop(columns=['customer_id', 'name']), use_container_width=True, hide_index=True)
+                        if st.button("Generate History PDF"):
                             pdf_data = generate_payment_history_pdf(history_df, customer_name, selected_customer_id)
                             b64 = base64.b64encode(pdf_data).decode()
-                            href = f'<a href="data:application/pdf;base64,{b64}" download="payment_history_{selected_customer_id}_{datetime.now().strftime("%Y%m%d")}.pdf">Click here to download the history report</a>'
-                            st.success("PDF Generated!")
+                            href = f'<a href="data:application/pdf;base64,{b64}" download="history_{selected_customer_id}.pdf">Download PDF</a>'
                             st.markdown(href, unsafe_allow_html=True)
-                else:
-                    st.info(f"No payment history found for {customer_name}.")
-        else:
-            st.info("No customers in the database.")
+                    else:
+                        st.info(f"No payment history for {customer_name}.")
+
+    # --- Customer Pages ---
+    elif st.session_state.role == "Customer":
+        customer_id = st.session_state.customer_id
+        
+        if choice == "My Details":
+            st.subheader("My Account Details")
+            customer_data = get_customer_by_id(customer_id)
+            if customer_data is not None:
+                customer_df = pd.DataFrame(customer_data).transpose()
+                customer_df.columns = customer_data.index
+                st.dataframe(format_df_dates(customer_df), use_container_width=True, hide_index=True)
+            else:
+                st.error("Could not retrieve your details.")
+
+        elif choice == "My Payment History":
+            st.subheader("My Payment History")
+            history_df = get_payment_history_by_customer_id(customer_id)
+            if not history_df.empty:
+                display_df = history_df.copy()
+                display_df['payment_date'] = pd.to_datetime(display_df['payment_date']).dt.strftime('%d-%m-%Y')
+                st.dataframe(display_df.drop(columns=['customer_id', 'name']), use_container_width=True, hide_index=True)
+                if st.button("Generate History PDF for Download"):
+                    pdf_data = generate_payment_history_pdf(history_df, st.session_state.customer_name, customer_id)
+                    b64 = base64.b64encode(pdf_data).decode()
+                    href = f'<a href="data:application/pdf;base64,{b64}" download="my_payment_history.pdf">Click here to download</a>'
+                    st.markdown(href, unsafe_allow_html=True)
+            else:
+                st.info("You have no payment history.")
 
 
 if __name__ == '__main__':
