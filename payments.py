@@ -321,10 +321,11 @@ def main():
         st.session_state.logged_in = False
     if 'history_customer_id' not in st.session_state:
         st.session_state.history_customer_id = None
-    if 'edit_customer_id' not in st.session_state:
-        st.session_state.edit_customer_id = None
-    if 'record_payment_customer_id' not in st.session_state:
-        st.session_state.record_payment_customer_id = None
+    # NEW state variables for the corrected logic
+    if 'customer_to_edit' not in st.session_state:
+        st.session_state.customer_to_edit = None
+    if 'customer_for_payment' not in st.session_state:
+        st.session_state.customer_for_payment = None
 
 
     if not st.session_state.logged_in:
@@ -350,10 +351,10 @@ def main():
         # Clear search states if we navigate away from the page
         if choice != "Payment History" and st.session_state.get('history_customer_id'):
             st.session_state.history_customer_id = None
-        if choice != "Update/Delete Customer" and st.session_state.get('edit_customer_id'):
-            st.session_state.edit_customer_id = None
-        if choice != "Record Payment" and st.session_state.get('record_payment_customer_id'):
-            st.session_state.record_payment_customer_id = None
+        if choice != "Update/Delete Customer" and st.session_state.get('customer_to_edit'):
+            st.session_state.customer_to_edit = None
+        if choice != "Record Payment" and st.session_state.get('customer_for_payment'):
+            st.session_state.customer_for_payment = None
     else: # Customer View
         menu = ["My Details", "My Payment History"]
         choice = st.sidebar.selectbox("Menu", menu)
@@ -410,76 +411,82 @@ def main():
         elif choice == "Update/Delete Customer":
             st.subheader("Update or Delete Customer Information")
             
-            customer_id_input = st.number_input("Enter Customer ID to Update or Delete", min_value=1, step=1, key="update_customer_id")
+            with st.form("find_customer_form"):
+                customer_id_to_find = st.number_input("Enter Customer ID to find", min_value=1, step=1)
+                submitted_find = st.form_submit_button("Find Customer")
 
-            if st.button("Find Customer"):
-                customer_data = get_customer_by_id(customer_id_input)
+            if submitted_find:
+                customer_data = get_customer_by_id(customer_id_to_find)
                 if customer_data is not None:
-                    st.session_state.edit_customer_id = customer_id_input
+                    st.session_state.customer_to_edit = customer_data.to_dict()
                 else:
-                    st.warning(f"No customer found with ID: {customer_id_input}")
-                    st.session_state.edit_customer_id = None
+                    st.warning(f"No customer found with ID: {customer_id_to_find}")
+                    if 'customer_to_edit' in st.session_state:
+                         st.session_state.customer_to_edit = None
             
-            if st.session_state.get('edit_customer_id'):
-                selected_customer_id = st.session_state.edit_customer_id
-                customer_data = get_customer_by_id(selected_customer_id)
+            if st.session_state.get('customer_to_edit'):
+                customer_data = st.session_state.customer_to_edit
+                selected_customer_id = customer_data['customer_id']
                 
-                if customer_data is not None:
-                    with st.form("update_customer_form"):
-                        st.write(f"**Editing Customer ID:** {customer_data['customer_id']}")
-                        name = st.text_input("Name", value=customer_data['name'])
-                        mobile = st.text_input("Mobile Number", value=customer_data['mobile'])
-                        address = st.text_area("Address", value=customer_data['address'])
-                        plan_details = st.text_input("Plan Details", value=customer_data['plan_details'])
-                        per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, value=float(customer_data['per_month_cost']))
-                        renewal_date_val = datetime.strptime(customer_data['internet_renewal_date'], '%Y-%m-%d').date() if customer_data['internet_renewal_date'] else datetime.now().date()
-                        internet_renewal_date = st.date_input("Internet Renewal Date", value=renewal_date_val)
-                        pending_amount = st.number_input("Pending Amount (₹)", min_value=0.0, value=float(customer_data['pending_amount']))
-                        
-                        col1, col2 = st.columns(2)
-                        if col1.form_submit_button("Update Customer"):
-                            update_customer(selected_customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
-                            st.success(f"Customer ID {selected_customer_id} updated successfully!")
-                            st.session_state.edit_customer_id = None # Clear state
-                            st.rerun()
-                        if col2.form_submit_button("Delete Customer"):
-                            delete_customer(selected_customer_id)
-                            st.warning(f"Customer ID {selected_customer_id} has been deleted.")
-                            st.session_state.edit_customer_id = None # Clear state
-                            st.rerun()
-
+                st.markdown("---")
+                st.write(f"**Now editing details for Customer ID: {selected_customer_id} ({customer_data['name']})**")
+                
+                with st.form("update_customer_form"):
+                    name = st.text_input("Name", value=customer_data['name'])
+                    mobile = st.text_input("Mobile Number", value=customer_data['mobile'])
+                    address = st.text_area("Address", value=customer_data['address'])
+                    plan_details = st.text_input("Plan Details", value=customer_data['plan_details'])
+                    per_month_cost = st.number_input("Per Month Cost (₹)", min_value=0.0, value=float(customer_data['per_month_cost']))
+                    renewal_date_val = datetime.strptime(customer_data['internet_renewal_date'], '%Y-%m-%d').date() if customer_data['internet_renewal_date'] else datetime.now().date()
+                    internet_renewal_date = st.date_input("Internet Renewal Date", value=renewal_date_val)
+                    pending_amount = st.number_input("Pending Amount (₹)", min_value=0.0, value=float(customer_data['pending_amount']))
+                    
+                    col1, col2 = st.columns(2)
+                    if col1.form_submit_button("Update Customer"):
+                        update_customer(selected_customer_id, name, mobile, address, plan_details, per_month_cost, internet_renewal_date, pending_amount)
+                        st.success(f"Customer ID {selected_customer_id} updated successfully!")
+                        st.session_state.customer_to_edit = None # Clear state
+                        st.rerun()
+                    if col2.form_submit_button("Delete Customer"):
+                        delete_customer(selected_customer_id)
+                        st.warning(f"Customer ID {selected_customer_id} has been deleted.")
+                        st.session_state.customer_to_edit = None # Clear state
+                        st.rerun()
 
         elif choice == "Record Payment":
             st.subheader("Record a Customer Payment")
             
-            customer_id_input = st.number_input("Enter Customer ID to Record Payment for", min_value=1, step=1, key="record_payment_customer_id_input")
+            with st.form("find_customer_for_payment_form"):
+                customer_id_to_find = st.number_input("Enter Customer ID to find", min_value=1, step=1)
+                submitted_find = st.form_submit_button("Find Customer")
 
-            if st.button("Find Customer for Payment"):
-                customer_data = get_customer_by_id(customer_id_input)
+            if submitted_find:
+                customer_data = get_customer_by_id(customer_id_to_find)
                 if customer_data is not None:
-                    st.session_state.record_payment_customer_id = customer_id_input
+                    st.session_state.customer_for_payment = customer_data.to_dict()
                 else:
-                    st.warning(f"No customer found with ID: {customer_id_input}")
-                    st.session_state.record_payment_customer_id = None
+                    st.warning(f"No customer found with ID: {customer_id_to_find}")
+                    if 'customer_for_payment' in st.session_state:
+                        st.session_state.customer_for_payment = None
             
-            if st.session_state.get('record_payment_customer_id'):
-                selected_customer_id = st.session_state.record_payment_customer_id
-                customer_data = get_customer_by_id(selected_customer_id)
+            if st.session_state.get('customer_for_payment'):
+                customer_data = st.session_state.customer_for_payment
+                selected_customer_id = customer_data['customer_id']
 
-                if customer_data is not None:
-                    st.write(f"**Recording payment for:** {customer_data['name']} (ID: {selected_customer_id})")
-                    st.write(f"**Current Pending Amount:** ₹{customer_data['pending_amount']:.2f}")
+                st.markdown("---")
+                st.write(f"**Recording payment for:** {customer_data['name']} (ID: {selected_customer_id})")
+                st.write(f"**Current Pending Amount:** ₹{customer_data['pending_amount']:.2f}")
 
-                    with st.form("payment_form", clear_on_submit=True):
-                        amount_paid = st.number_input("Amount Paid (₹)", min_value=0.01, step=50.0)
-                        payment_date = st.date_input("Payment Date", value=datetime.now().date())
-                        if st.form_submit_button("Record Payment"):
-                            if record_payment(selected_customer_id, amount_paid, payment_date):
-                                st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}.")
-                                st.session_state.record_payment_customer_id = None # Clear state after recording
-                                st.rerun()
-                            else:
-                                st.error("Failed to record payment.")
+                with st.form("payment_form", clear_on_submit=True):
+                    amount_paid = st.number_input("Amount Paid (₹)", min_value=0.01, step=50.0)
+                    payment_date = st.date_input("Payment Date", value=datetime.now().date())
+                    if st.form_submit_button("Record Payment"):
+                        if record_payment(selected_customer_id, amount_paid, payment_date):
+                            st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}.")
+                            st.session_state.customer_for_payment = None # Clear state
+                            st.rerun()
+                        else:
+                            st.error("Failed to record payment.")
         
         elif choice == "Upcoming Renewals":
             st.subheader("Upcoming Renewals")
