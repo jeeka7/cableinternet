@@ -236,7 +236,7 @@ def update_pending_amounts():
     conn.commit()
     conn.close()
 
-def record_payment(customer_id, amount_paid):
+def record_payment(customer_id, amount_paid, payment_date):
     """Records a payment for a customer, updates their pending amount, and logs the transaction."""
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
@@ -259,7 +259,7 @@ def record_payment(customer_id, amount_paid):
             c.execute('''
                 INSERT INTO payment_history (customer_id, payment_amount, payment_date)
                 VALUES (?, ?, ?)
-            ''', (customer_id, amount_paid, datetime.now().date().strftime('%Y-%m-%d')))
+            ''', (customer_id, amount_paid, payment_date.strftime('%Y-%m-%d')))
             conn.commit()
             return True
         else:
@@ -386,9 +386,10 @@ def main():
                 selected_customer_id = int(selected_customer_str.split(" - ")[0])
                 with st.form("payment_form", clear_on_submit=True):
                     amount_paid = st.number_input("Amount Paid (₹)", min_value=0.01, step=50.0)
+                    payment_date = st.date_input("Payment Date", value=datetime.now().date())
                     payment_button = st.form_submit_button("Record Payment")
                     if payment_button:
-                        if record_payment(selected_customer_id, amount_paid):
+                        if record_payment(selected_customer_id, amount_paid, payment_date):
                             st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}. Renewal date and pending amount updated.")
                         else:
                             st.error("Failed to record payment.")
