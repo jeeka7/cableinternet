@@ -276,7 +276,7 @@ def format_df_dates(df, date_column='internet_renewal_date'):
     """Formats a DataFrame's date column to DD-MM-YYYY."""
     df_display = df.copy()
     if date_column in df_display.columns and not df_display.empty:
-        df_display[date_column] = pd.to_datetime(df_display[date_column]).dt.strftime('%d-%m-%Y')
+        df_display[date_column] = pd.to_datetime(df_display[date_column], errors='coerce').dt.strftime('%d-%m-%Y')
     return df_display
 
 # --- Login and UI ---
