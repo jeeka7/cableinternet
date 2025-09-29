@@ -31,7 +31,9 @@ def generate_pdf(df):
     pdf.set_font('Helvetica', '', 11)
     # Table Body
     for index, row in df.iterrows():
-        pdf.cell(130, 10, str(row['name']), 1, 0)
+        # Sanitize name for the PDF's default font encoding (latin-1) to prevent errors
+        name = str(row['name']).encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(130, 10, name, 1, 0)
         pdf.cell(60, 10, f"{row['pending_amount']:.2f}", 1, 1, 'R')
         
     # Total Calculation
@@ -45,7 +47,7 @@ def generate_pdf(df):
     pdf.set_font('Helvetica', 'I', 10)
     pdf.cell(0, 10, f"Report generated on: {datetime.now().strftime('%d-%m-%Y')}", 0, 1, 'L')
     
-    # Return PDF as bytes, which is the expected format for st.download_button
+    # Return PDF as bytes
     return pdf.output()
 
 
@@ -198,7 +200,7 @@ def record_payment(customer_id, amount_paid):
             UPDATE customers
             SET pending_amount = ?, internet_renewal_date = ?
             WHERE customer_id = ?
-        ''', (new_pending_amount, new_renewal_date, customer_id))
+        ''', (new_pending_amount, new_renewal_date.strftime('%Y-%m-%d'), customer_id))
         conn.commit()
         conn.close()
         return True
@@ -233,13 +235,12 @@ def main():
             customers_df_no_address = customers_df.drop(columns=['address'])
             display_df = format_df_dates(customers_df_no_address)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
+            
+            if st.button("Generate & View PDF Report"):
+                with st.spinner('Generating PDF...'):
+                    pdf_data = generate_pdf(customers_df[['name', 'pending_amount']])
+                    st.pdf(pdf_data)
 
-            st.download_button(
-                label="Download Report as PDF",
-                data=generate_pdf(customers_df[['name', 'pending_amount']]),
-                file_name=f"pending_amounts_{datetime.now().strftime('%Y%m%d')}.pdf",
-                mime="application/pdf"
-            )
         else:
             st.info("No customers found. Add a customer to get started.")
 
