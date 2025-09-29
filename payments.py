@@ -2,6 +2,51 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime, timedelta
+from fpdf import FPDF
+
+# --- PDF Generation ---
+class PDF(FPDF):
+    def header(self):
+        # Set up a logo or title
+        self.set_font('Helvetica', 'B', 15)
+        self.cell(0, 10, 'Customer Pending Amount Report', 0, 1, 'C')
+        self.ln(10)
+
+    def footer(self):
+        # Page numbers in the footer
+        self.set_y(-15)
+        self.set_font('Helvetica', 'I', 8)
+        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+
+def generate_pdf(df):
+    """Generates a PDF report from a dataframe of customers."""
+    pdf = PDF()
+    pdf.add_page()
+    pdf.set_font('Helvetica', 'B', 12)
+    
+    # Table Header
+    pdf.cell(130, 10, 'Customer Name', 1, 0, 'C')
+    pdf.cell(60, 10, 'Pending Amount (Rs)', 1, 1, 'C')
+    
+    pdf.set_font('Helvetica', '', 11)
+    # Table Body
+    for index, row in df.iterrows():
+        pdf.cell(130, 10, str(row['name']), 1, 0)
+        pdf.cell(60, 10, f"{row['pending_amount']:.2f}", 1, 1, 'R')
+        
+    # Total Calculation
+    total_pending = df['pending_amount'].sum()
+    pdf.set_font('Helvetica', 'B', 12)
+    pdf.cell(130, 10, 'Total Pending Amount', 1, 0, 'R')
+    pdf.cell(60, 10, f"{total_pending:.2f}", 1, 1, 'R')
+    
+    # Report Date
+    pdf.ln(10)
+    pdf.set_font('Helvetica', 'I', 10)
+    pdf.cell(0, 10, f"Report generated on: {datetime.now().strftime('%d-%m-%Y')}", 0, 1, 'L')
+    
+    return pdf.output(dest='S').encode('latin-1')
+
 
 # --- Database Setup ---
 def init_db():
@@ -187,6 +232,13 @@ def main():
             customers_df_no_address = customers_df.drop(columns=['address'])
             display_df = format_df_dates(customers_df_no_address)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
+
+            st.download_button(
+                label="Download Report as PDF",
+                data=generate_pdf(customers_df[['name', 'pending_amount']]),
+                file_name=f"pending_amounts_{datetime.now().strftime('%Y%m%d')}.pdf",
+                mime="application/pdf"
+            )
         else:
             st.info("No customers found. Add a customer to get started.")
 
