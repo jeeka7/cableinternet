@@ -138,7 +138,9 @@ def main():
         st.subheader("All Customers")
         customers_df = get_all_customers()
         if not customers_df.empty:
-            display_df = format_df_dates(customers_df)
+            # Hide address column in the main view as requested
+            customers_df_no_address = customers_df.drop(columns=['address'])
+            display_df = format_df_dates(customers_df_no_address)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
         else:
             st.info("No customers found. Add a customer to get started.")
