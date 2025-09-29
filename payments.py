@@ -160,7 +160,7 @@ def get_customer_by_id(customer_id):
     """Retrieves a single customer by their ID."""
     conn = sqlite3.connect('isp_payments.db')
     # Use parameters to prevent SQL injection
-    customer_df = pd.read_sql_query("SELECT * FROM customers WHERE customer_id = ?", conn, params=(customer_id,))
+    customer_df = pd.read_sql_query("SELECT * FROM customers WHERE customer_id = ?", conn, params=(int(customer_id),))
     conn.close()
     return customer_df.iloc[0] if not customer_df.empty else None
 
@@ -178,7 +178,7 @@ def get_payment_history_by_customer_id(customer_id):
         WHERE ph.customer_id = ?
         ORDER BY ph.payment_date DESC
     """
-    df = pd.read_sql_query(query, conn, params=(customer_id,))
+    df = pd.read_sql_query(query, conn, params=(int(customer_id),))
     conn.close()
     return df
 
@@ -200,8 +200,8 @@ def delete_customer(customer_id):
     """Deletes a customer from the database."""
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
-    c.execute("DELETE FROM customers WHERE customer_id = ?", (customer_id,))
-    c.execute("DELETE FROM payment_history WHERE customer_id = ?", (customer_id,)) # Also delete payment history
+    c.execute("DELETE FROM customers WHERE customer_id = ?", (int(customer_id),))
+    c.execute("DELETE FROM payment_history WHERE customer_id = ?", (int(customer_id),)) # Also delete payment history
     conn.commit()
     conn.close()
 
@@ -247,7 +247,7 @@ def record_payment(customer_id, amount_paid, payment_date):
     conn = sqlite3.connect('isp_payments.db')
     c = conn.cursor()
     try:
-        c.execute("SELECT pending_amount FROM customers WHERE customer_id = ?", (customer_id,))
+        c.execute("SELECT pending_amount FROM customers WHERE customer_id = ?", (int(customer_id),))
         customer_data = c.fetchone()
         if customer_data:
             current_pending_amount = customer_data[0]
@@ -384,8 +384,7 @@ def main():
                 customer_data = get_customer_by_id(customer_id_to_search)
                 if customer_data is not None:
                     st.success(f"Displaying details for Customer ID: {customer_id_to_search}")
-                    customer_df = pd.DataFrame(customer_data).transpose()
-                    customer_df.columns = customer_data.index
+                    customer_df = pd.DataFrame([customer_data])
                     display_df = format_df_dates(customer_df)
                     st.dataframe(display_df, use_container_width=True, hide_index=True)
                 else:
@@ -411,7 +410,7 @@ def main():
         elif choice == "Update/Delete Customer":
             st.subheader("Update or Delete Customer Information")
             
-            customer_id_input = st.number_input("Enter Customer ID to Update or Delete", min_value=1, step=1)
+            customer_id_input = st.number_input("Enter Customer ID to Update or Delete", min_value=1, step=1, key="update_customer_id")
 
             if st.button("Find Customer"):
                 customer_data = get_customer_by_id(customer_id_input)
@@ -453,7 +452,7 @@ def main():
         elif choice == "Record Payment":
             st.subheader("Record a Customer Payment")
             
-            customer_id_input = st.number_input("Enter Customer ID to Record Payment for", min_value=1, step=1)
+            customer_id_input = st.number_input("Enter Customer ID to Record Payment for", min_value=1, step=1, key="record_payment_customer_id_input")
 
             if st.button("Find Customer for Payment"):
                 customer_data = get_customer_by_id(customer_id_input)
@@ -478,6 +477,7 @@ def main():
                             if record_payment(selected_customer_id, amount_paid, payment_date):
                                 st.success(f"Payment of ₹{amount_paid} recorded for Customer ID {selected_customer_id}.")
                                 st.session_state.record_payment_customer_id = None # Clear state after recording
+                                st.rerun()
                             else:
                                 st.error("Failed to record payment.")
         
@@ -507,7 +507,7 @@ def main():
         elif choice == "Payment History":
             st.subheader("View Customer Payment History")
             
-            customer_id_input = st.number_input("Enter Customer ID to view payment history", min_value=1, step=1)
+            customer_id_input = st.number_input("Enter Customer ID to view payment history", min_value=1, step=1, key="history_customer_id_input")
 
             if st.button("View History"):
                 customer_data = get_customer_by_id(customer_id_input)
@@ -551,8 +551,7 @@ def main():
             st.subheader("My Account Details")
             customer_data = get_customer_by_id(customer_id)
             if customer_data is not None:
-                customer_df = pd.DataFrame(customer_data).transpose()
-                customer_df.columns = customer_data.index
+                customer_df = pd.DataFrame([customer_data])
                 # Drop sensitive columns for customer view
                 customer_display_df = customer_df.drop(columns=['mobile', 'address'])
                 st.dataframe(format_df_dates(customer_display_df), use_container_width=True, hide_index=True)
