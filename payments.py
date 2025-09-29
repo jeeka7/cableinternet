@@ -464,26 +464,27 @@ def main():
 
         elif choice == "Payment History":
             st.subheader("View Customer Payment History")
-            customers_df = get_all_customers()
-            if not customers_df.empty:
-                customer_list = [f"{row['customer_id']} - {row['name']}" for _, row in customers_df.iterrows()]
-                selected_customer_str = st.selectbox("Select a Customer", customer_list)
-                if selected_customer_str:
-                    selected_customer_id = int(selected_customer_str.split(" - ")[0])
-                    customer_name = selected_customer_str.split(" - ")[1]
-                    history_df = get_payment_history_by_customer_id(selected_customer_id)
+            customer_id_to_view = st.number_input("Enter Customer ID to view payment history", min_value=1, step=1)
+            if st.button("View History"):
+                customer_data = get_customer_by_id(customer_id_to_view)
+                if customer_data is not None:
+                    customer_name = customer_data['name']
+                    history_df = get_payment_history_by_customer_id(customer_id_to_view)
                     if not history_df.empty:
-                        st.write(f"#### History for {customer_name}")
+                        st.write(f"#### History for {customer_name} (ID: {customer_id_to_view})")
                         display_df = history_df.copy()
                         display_df['payment_date'] = pd.to_datetime(display_df['payment_date']).dt.strftime('%d-%m-%Y')
                         st.dataframe(display_df.drop(columns=['customer_id', 'name']), use_container_width=True, hide_index=True)
                         if st.button("Generate History PDF"):
-                            pdf_data = generate_payment_history_pdf(history_df, customer_name, selected_customer_id)
+                            pdf_data = generate_payment_history_pdf(history_df, customer_name, customer_id_to_view)
                             b64 = base64.b64encode(pdf_data).decode()
-                            href = f'<a href="data:application/pdf;base64,{b64}" download="history_{selected_customer_id}.pdf">Download PDF</a>'
+                            href = f'<a href="data:application/pdf;base64,{b64}" download="history_{customer_id_to_view}.pdf">Download PDF</a>'
                             st.markdown(href, unsafe_allow_html=True)
                     else:
                         st.info(f"No payment history for {customer_name}.")
+                else:
+                    st.warning(f"No customer found with ID: {customer_id_to_view}")
+
 
     # --- Customer Pages ---
     elif st.session_state.role == "Customer":
