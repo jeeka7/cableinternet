@@ -430,7 +430,7 @@ def main():
                 selected_customer_id = int(selected_customer_str.split(" - ")[0])
                 customer_name = selected_customer_str.split(" - ")[1]
                 history_df = get_payment_history_by_customer_id(selected_customer_id)
-                if not history_.empty:
+                if not history_df.empty:
                     st.write(f"#### Displaying history for {customer_name}")
                     display_history_df = history_df.copy()
                     display_history_df['payment_date'] = pd.to_datetime(display_history_df['payment_date']).dt.strftime('%d-%m-%Y')
